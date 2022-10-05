@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "rank": 1,
+    "proficiency": 2,
+    "name": "Ahmad Punjabi",
+    "catch-phrase": "Hello, cousin."
+  },
+  {
+    "id": 2,
+    "rank": 3,
+    "proficiency": 2,
+    "name": "Valeriu Moraru",
+    "catch-phrase": "Great Britain is the capital of London."
+  },
+  {
+    "id": 3,
+    "rank": 3,
+    "proficiency": 3,
+    "name": "Gordon Ramsay",
+    "catch-phrase": "Hey, panini head, are you listening to me?"
+  }
+]

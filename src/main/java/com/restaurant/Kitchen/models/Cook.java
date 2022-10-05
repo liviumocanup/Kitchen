@@ -1,73 +1,90 @@
 package com.restaurant.Kitchen.models;
 
-import java.util.List;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.restaurant.Kitchen.service.KitchenService;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
+
+import java.util.Comparator;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static java.lang.Thread.sleep;
-
+@Getter
+@Setter
+@Slf4j
 public class Cook {
-    private Long id;
+    @JsonAlias("id")
+    private int id;
+
+    @JsonAlias("rank")
     private int rank;
+
+    @JsonAlias("proficiency")
     private int proficiency;
+
+    @JsonAlias("name")
     private String name;
+
+    @JsonAlias("catch-phrase")
     private String catchPhrase;
 
-    public AtomicBoolean isBusy() {
-        return busy;
+    @JsonIgnore
+    private AtomicInteger concurrentDishesCounter = new AtomicInteger();
+
+    @JsonIgnore
+    private AtomicBoolean full = new AtomicBoolean(false);
+
+    @JsonIgnore
+    private ExecutorService executorService;
+
+    @JsonIgnore
+    private static final int TIME_UNIT = KitchenService.TIME_UNIT;
+
+    public void prepareItem(Item item) {
+        if (concurrentDishesCounter.compareAndSet(proficiency, concurrentDishesCounter.intValue())) {
+            full.set(true);
+        }
+        this.concurrentDishesCounter.getAndIncrement();
+        executorService.execute(() -> cookItem(item));
     }
 
-    private AtomicBoolean busy;
+    public void cookItem(Item item) {
+        try {
+            Thread.sleep(item.getCookingTime() * TIME_UNIT);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
 
-    private AtomicLong idCounter = new AtomicLong();
+        this.concurrentDishesCounter.getAndDecrement();
+        log.info("+ Order " + item + " is ready.");
+        full.set(false);
+        KitchenService.checkIfOrderIsReady(item, this.id);
+    }
+
+    public int getConcurrentDishesCounter() {
+        return concurrentDishesCounter.intValue();
+    }
 
     @Override
     public String toString() {
         return "Cook{" +
-                "rank=" + rank +
+                "id=" + id +
+                ", rank=" + rank +
                 ", proficiency=" + proficiency +
                 ", name='" + name + '\'' +
                 ", catchPhrase='" + catchPhrase + '\'' +
+                ", executorService=" + executorService +
+                ", concurrentDishesCounter=" + concurrentDishesCounter +
                 '}';
     }
 
-    public Cook(int rank, int proficiency, String name, String catchPhrase) {
-        this.id = idCounter.incrementAndGet();
-        this.rank = rank;
+    public void setProficiency(int proficiency) {
         this.proficiency = proficiency;
-        this.name = name;
-        this.catchPhrase = catchPhrase;
-        this.busy = new AtomicBoolean(false);
-    }
-
-    public FinishedOrder prepareOrder(Order order, List<Food> foodList,int TIME_UNIT){
-        System.out.println("+ Cook "+this.name+" received " + order.toString());
-        busy.set(true);
-
-        CookingDetails cookingDetails = new CookingDetails();
-        Long[] items = order.getItems();
-
-        long startTime = System.nanoTime();
-
-        for (Long item : items) {
-            try {
-                cookingDetails.addCookingDetail(new CookingDetail(item, this.id));
-                for(Food food : foodList){
-                    if (food.getId().equals(item))
-                        sleep(food.getPreparation_time()*TIME_UNIT);
-                }
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
-        long endTime = System.nanoTime();
-
-        FinishedOrder finishedOrder = new FinishedOrder(order.getOrder_id(), order.getTable_id(), order.getWaiter_id(), order.getItems(), order.getPriority(),
-                order.getMax_wait(), order.getPick_up_time(), (double) (endTime - startTime), cookingDetails);
-
-        System.out.println(this.name + " " + finishedOrder);
-        busy.set(false);
-        return finishedOrder;
+        executorService = Executors.newFixedThreadPool(proficiency);
     }
 }
