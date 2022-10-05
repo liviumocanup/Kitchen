@@ -27,7 +27,7 @@ public class KitchenService {
     private final ExecutorService orderItemDispatcher = Executors.newSingleThreadExecutor();
 
 
-    public final static int TIME_UNIT = 100;
+    public final static int TIME_UNIT = 500;
 
     public void receiveOrder(Order order) {
         order.setReceivedAt(Instant.now());
@@ -40,17 +40,25 @@ public class KitchenService {
                     currentFood.getPreparationTime(), currentFood.getComplexity()));
         }
 
-        orderItems.forEach(item -> orderItemDispatcher.submit(() -> findRightCook(item)));
+        orderItems.stream().sorted(Comparator.comparingInt(Item::getPriority)).forEach(item -> orderItemDispatcher.submit(() -> findRightCook(item)));
     }
 
     private void findRightCook(Item item) {
-        Cook selectedCook = cookList.stream()
+        Optional<Cook> selectedCook = cookList.stream()
                 .filter(c -> c.getRank() >= item.getComplexity())
                 .filter(c -> !c.getFull().get())
                 .min(Comparator.comparing(Cook::getConcurrentDishesCounter)
                         .thenComparing(Cook::getRank))
-                .orElseThrow();
-        selectedCook.prepareItem(item);
+                .stream().findFirst();
+        if(selectedCook.isEmpty()) {
+            try {
+                Thread.sleep(2 * TIME_UNIT);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            findRightCook(item);
+        }
+        else selectedCook.get().prepareItem(item);
     }
 
     public synchronized static void checkIfOrderIsReady(Item item, int cookId) {
