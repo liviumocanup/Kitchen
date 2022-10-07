@@ -3,60 +3,108 @@ package com.restaurant.Kitchen.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.restaurant.Kitchen.models.*;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static java.lang.Thread.sleep;
-
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
 
 @Service
+@Slf4j
 public class KitchenService {
-    static RestTemplate restTemplate = new RestTemplate();
-
     private static final List<Food> foodList = loadDefaultMenu();
-    private List<Cook> cooks = Collections.synchronizedList(new ArrayList<>());
-    public final Integer TIME_UNIT = 50;
+    private static final List<Cook> cookList = loadDefaultCooks();
+    public static final List<Order> orderList = new CopyOnWriteArrayList<>();
 
-    ExecutorService executorService = Executors.newFixedThreadPool(3);
+    public static final Map<Integer, List<CookingDetails>> orderToFoodListMap = new ConcurrentHashMap<>();
 
-    public KitchenService() throws FileNotFoundException {
-        cooks.add(new Cook(1, 2, "Ahmad Punjabi", "Hello, cousin."));
-        cooks.add(new Cook(2, 2, "Valeriu Moraru", "Great Britain is the capital of London."));
-        cooks.add(new Cook(3, 3, "Gordon Ramsay", "Hey, panini head, are you listening to me?"));
+    private final ExecutorService orderItemDispatcher = Executors.newSingleThreadExecutor();
+
+
+    public final static int TIME_UNIT = 500;
+
+    public void receiveOrder(Order order) {
+        order.setReceivedAt(Instant.now());
+        orderList.add(order);
+
+        List<Item> orderItems = new CopyOnWriteArrayList<>();
+        for (Integer foodId : order.getItems()) {
+            Food currentFood = foodList.get(foodId - 1);
+            orderItems.add(new Item(foodId, order.getOrderId(), order.getPriority(), currentFood.getCookingApparatus(),
+                    currentFood.getPreparationTime(), currentFood.getComplexity()));
+        }
+
+        orderItems.stream().sorted(Comparator.comparingInt(Item::getPriority)).forEach(item -> orderItemDispatcher.submit(() -> findRightCook(item)));
     }
 
-    public void takeOrderToCook(Order order) {
-
-        Runnable runnableTask = () -> {
-            for (Cook cook : cooks) {
-                if (!cook.isBusy().compareAndExchange(false, true)){
-                    restTemplate.postForObject("http://dining-hall-docker:8080/distribution", cook.prepareOrder(order, foodList, TIME_UNIT), String.class);
-                    break;
-                }
+    private void findRightCook(Item item) {
+        Optional<Cook> selectedCook = cookList.stream()
+                .filter(c -> c.getRank() >= item.getComplexity())
+                .filter(c -> !c.getFull().get())
+                .min(Comparator.comparing(Cook::getConcurrentDishesCounter)
+                        .thenComparing(Cook::getRank))
+                .stream().findFirst();
+        if(selectedCook.isEmpty()) {
+            try {
+                Thread.sleep(2 * TIME_UNIT);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
-        };
-
-        executorService.execute(runnableTask);
-
-
+            findRightCook(item);
+        }
+        else selectedCook.get().prepareItem(item);
     }
 
-    private static List<Food> loadDefaultMenu(){
+    public synchronized static void checkIfOrderIsReady(Item item, int cookId) {
+
+        Order order = orderList.stream()
+                .filter(order1 -> order1.getOrderId() == item.getOrderId())
+                .findFirst()
+                .orElseThrow();
+
+        orderToFoodListMap.putIfAbsent(item.getOrderId(), new ArrayList<>());
+        List<CookingDetails> cookingDetails = orderToFoodListMap.get(item.getOrderId());
+        cookingDetails.add(new CookingDetails(item.getMenuId(), cookId));
+        if (cookingDetails.size() == order.getItems().size()) {
+            sendFinishedOrderBackToKitchen(order);
+        }
+    }
+
+    private static void sendFinishedOrderBackToKitchen(Order order) {
+        Long cookingTime = (Instant.now().getEpochSecond() - order.getReceivedAt().getEpochSecond());
+        FinishedOrder finishedOrder = new FinishedOrder(order, cookingTime, orderToFoodListMap.get(order.getOrderId()));
+
+        RestTemplate restTemplate = new RestTemplate();
+        ResponseEntity<Void> response = restTemplate.postForEntity("http://localhost:8080/distribution", finishedOrder, Void.class);
+        if (response.getStatusCode() != HttpStatus.ACCEPTED) {
+            log.error("Order couldn't be sent back to dinning hall service!");
+        } else {
+            log.info("<-- "+finishedOrder+" was sent back to kitchen successfully.");
+        }
+    }
+
+    private static List<Food> loadDefaultMenu() {
         ObjectMapper mapper = new ObjectMapper();
         InputStream is = KitchenService.class.getResourceAsStream("/menu-items.json");
         try {
             return mapper.readValue(is, new TypeReference<List<Food>>() {
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static List<Cook> loadDefaultCooks() {
+        ObjectMapper mapper = new ObjectMapper();
+        InputStream is = KitchenService.class.getResourceAsStream("/cooks.json");
+        try {
+            return mapper.readValue(is, new TypeReference<List<Cook>>() {
             });
         } catch (IOException e) {
             throw new RuntimeException(e);
