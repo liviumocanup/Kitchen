@@ -18,19 +18,25 @@ import java.util.concurrent.*;
 @Service
 @Slf4j
 public class KitchenService {
-    private static final List<Food> foodList = loadDefaultMenu();
-    private static final List<Cook> cookList = loadDefaultCooks();
+    public static final List<Food> foodList = loadDefaultMenu();
+    public static final List<Cook> cookList = loadDefaultCooks();
     public static final List<Order> orderList = new CopyOnWriteArrayList<>();
 
     public static final Map<Integer, List<CookingDetails>> orderToFoodListMap = new ConcurrentHashMap<>();
 
-    private final ExecutorService orderItemDispatcher = Executors.newSingleThreadExecutor();
+    private static final Integer NUMBER_OF_STOVES = 1;
+    private static final Integer NUMBER_OF_OVENS = 2;
 
+    public static final Semaphore stoveSemaphore = new Semaphore(NUMBER_OF_STOVES);
+    public static final Semaphore ovenSemaphore = new Semaphore(NUMBER_OF_OVENS);
 
-    public final static int TIME_UNIT = 500;
+    public static BlockingQueue<Item> items = new LinkedBlockingQueue<>();
+
+    public final static int TIME_UNIT = 50;
 
     public void receiveOrder(Order order) {
         order.setReceivedAt(Instant.now());
+        log.info("--> Received " + order + " successfully.");
         orderList.add(order);
 
         List<Item> orderItems = new CopyOnWriteArrayList<>();
@@ -40,28 +46,12 @@ public class KitchenService {
                     currentFood.getPreparationTime(), currentFood.getComplexity()));
         }
 
-        orderItems.stream().sorted(Comparator.comparingInt(Item::getPriority)).forEach(item -> orderItemDispatcher.submit(() -> findRightCook(item)));
+        orderItems.stream()
+                .sorted(Comparator.comparingInt(Item::getPriority))
+                .forEach(item -> items.add(item));
     }
 
-    private void findRightCook(Item item) {
-        Optional<Cook> selectedCook = cookList.stream()
-                .filter(c -> c.getRank() >= item.getComplexity())
-                .filter(c -> !c.getFull().get())
-                .min(Comparator.comparing(Cook::getConcurrentDishesCounter)
-                        .thenComparing(Cook::getRank))
-                .stream().findFirst();
-        if(selectedCook.isEmpty()) {
-            try {
-                Thread.sleep(2 * TIME_UNIT);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-            findRightCook(item);
-        }
-        else selectedCook.get().prepareItem(item);
-    }
-
-    public synchronized static void checkIfOrderIsReady(Item item, int cookId) {
+    public static synchronized void checkIfOrderIsReady(Item item, int cookId) {
 
         Order order = orderList.stream()
                 .filter(order1 -> order1.getOrderId() == item.getOrderId())
@@ -83,9 +73,9 @@ public class KitchenService {
         RestTemplate restTemplate = new RestTemplate();
         ResponseEntity<Void> response = restTemplate.postForEntity("http://localhost:8080/distribution", finishedOrder, Void.class);
         if (response.getStatusCode() != HttpStatus.ACCEPTED) {
-            log.error("Order couldn't be sent back to dinning hall service!");
+            log.error("<!!!!!> " + order + " was unsuccessful (couldn't be sent back to dinning hall service).");
         } else {
-            log.info("<-- "+finishedOrder+" was sent back to kitchen successfully.");
+            log.info("<-- "+finishedOrder+" was sent back to Kitchen successfully.");
         }
     }
 
