@@ -19,7 +19,6 @@ public class KitchenController {
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     public void receiveOrder(@RequestBody Order order) {
-        log.info("--> Received " + order + " successfully.");
         kitchenService.receiveOrder(order);
     }
 }

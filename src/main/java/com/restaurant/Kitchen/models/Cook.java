@@ -2,20 +2,19 @@ package com.restaurant.Kitchen.models;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.restaurant.Kitchen.constants.CookingApparatus;
 import com.restaurant.Kitchen.service.KitchenService;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Comparator;
-import java.util.PriorityQueue;
-import java.util.Queue;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.restaurant.Kitchen.service.KitchenService.items;
+
 @Getter
-@Setter
 @Slf4j
 public class Cook {
     @JsonAlias("id")
@@ -34,40 +33,76 @@ public class Cook {
     private String catchPhrase;
 
     @JsonIgnore
-    private AtomicInteger concurrentDishesCounter = new AtomicInteger();
-
-    @JsonIgnore
-    private AtomicBoolean full = new AtomicBoolean(false);
-
-    @JsonIgnore
     private ExecutorService executorService;
 
     @JsonIgnore
     private static final int TIME_UNIT = KitchenService.TIME_UNIT;
 
-    public void prepareItem(Item item) {
-        if (concurrentDishesCounter.compareAndSet(proficiency, concurrentDishesCounter.intValue())) {
-            full.set(true);
+    @JsonIgnore
+    private static final List<Item> checkedFoods = new CopyOnWriteArrayList<>();
+
+    @JsonIgnore
+    private AtomicInteger concurrentDishesCounter = new AtomicInteger();
+
+    private void lookForFoodToPrepare() {
+        executorService = Executors.newFixedThreadPool(proficiency);
+
+        Runnable checkItems = () -> {
+
+            while (true) {
+                if(concurrentDishesCounter.get()<proficiency){
+                    Item item = findRightFoodToCook();
+
+                    itemIsCooked(item);
+
+                    KitchenService.checkIfOrderIsReady(item, id);
+                }else {
+                    throw new RuntimeException();
+                }
+            }
+
+        };
+
+        for (int i = 0; i < proficiency; i++) {
+            executorService.execute(checkItems);
         }
-        this.concurrentDishesCounter.getAndIncrement();
-        executorService.execute(() -> cookItem(item));
     }
 
-    public void cookItem(Item item) {
+    private Item findRightFoodToCook() {
         try {
-            Thread.sleep(item.getCookingTime() * TIME_UNIT);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+            Optional<Item> item;
+            do {
+                item = items.stream().filter(i -> i.getComplexity() <= rank).findFirst();
+                if(item.isEmpty())
+                    Thread.sleep(3*TIME_UNIT);
+            } while(item.isEmpty());
 
-        this.concurrentDishesCounter.getAndDecrement();
-        log.info("+ Order " + item + " is ready.");
-        full.set(false);
-        KitchenService.checkIfOrderIsReady(item, this.id);
+            items.remove(item.get());
+            concurrentDishesCounter.incrementAndGet();
+            return item.get();
+
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public int getConcurrentDishesCounter() {
-        return concurrentDishesCounter.intValue();
+    private void itemIsCooked(Item item) {
+        try {
+            if (item.getCookingApparatus() != null) {
+                Semaphore semaphore = item.getCookingApparatus().equals(CookingApparatus.OVEN) ?
+                        KitchenService.ovenSemaphore : KitchenService.stoveSemaphore;
+
+                semaphore.acquire();
+                Thread.sleep(item.getCookingTime() * TIME_UNIT);
+                concurrentDishesCounter.decrementAndGet();
+                semaphore.release();
+            } else {
+                Thread.sleep(item.getCookingTime() * TIME_UNIT);
+                concurrentDishesCounter.decrementAndGet();
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -79,12 +114,27 @@ public class Cook {
                 ", name='" + name + '\'' +
                 ", catchPhrase='" + catchPhrase + '\'' +
                 ", executorService=" + executorService +
-                ", concurrentDishesCounter=" + concurrentDishesCounter +
                 '}';
+    }
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    public void setRank(int rank) {
+        this.rank = rank;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public void setCatchPhrase(String catchPhrase) {
+        this.catchPhrase = catchPhrase;
+        lookForFoodToPrepare();
     }
 
     public void setProficiency(int proficiency) {
         this.proficiency = proficiency;
-        executorService = Executors.newFixedThreadPool(proficiency);
     }
 }

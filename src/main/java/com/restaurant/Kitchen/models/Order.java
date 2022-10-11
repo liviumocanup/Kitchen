@@ -38,18 +38,6 @@ public class Order {
     @JsonIgnore
     private Instant receivedAt;
 
-    @JsonIgnore
-    private static AtomicInteger idCounter = new AtomicInteger();
-
-    public Order(int tableId, List<Integer> items, int priority, double maxWait, long pickUpTime) {
-        this.orderId = idCounter.incrementAndGet();
-        this.tableId = tableId;
-        this.items = items;
-        this.priority = priority;
-        this.maxWait = maxWait;
-        this.pickUpTime = pickUpTime;
-    }
-
     @Override
     public String toString() {
         return "Order{" +
@@ -62,5 +50,9 @@ public class Order {
                 ", pickUpTime=" + pickUpTime +
                 ", receivedAt=" + receivedAt +
                 '}';
+    }
+
+    public void setReceivedAt(Instant receivedAt) {
+        this.receivedAt = receivedAt;
     }
 }
