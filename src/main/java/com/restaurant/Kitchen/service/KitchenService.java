@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.restaurant.Kitchen.models.*;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -34,9 +36,17 @@ public class KitchenService {
 
     public final static int TIME_UNIT = 50;
 
+    protected static Map<Integer, Food> itemMap;
+    private static String DINING_HALL_URL;
+
+    @Value("${dining-hall-service.url}")
+    public void setDiningHallServiceUrl(String url) {
+        DINING_HALL_URL = url;
+    }
+
     public void receiveOrder(Order order) {
         order.setReceivedAt(Instant.now());
-        log.info("--> Received " + order + " successfully.");
+        log.info("-> Received " + order + " successfully.");
         orderList.add(order);
 
         List<Item> orderItems = new CopyOnWriteArrayList<>();
@@ -71,20 +81,63 @@ public class KitchenService {
         FinishedOrder finishedOrder = new FinishedOrder(order, cookingTime, orderToFoodListMap.get(order.getOrderId()));
 
         RestTemplate restTemplate = new RestTemplate();
-        ResponseEntity<Void> response = restTemplate.postForEntity("http://localhost:8080/distribution", finishedOrder, Void.class);
+
+        ResponseEntity<Void> response = restTemplate.postForEntity(DINING_HALL_URL, finishedOrder, Void.class);
         if (response.getStatusCode() != HttpStatus.ACCEPTED) {
-            log.error("<!!!!!> " + order + " was unsuccessful (couldn't be sent back to dinning hall service).");
+            log.error("<!!!!!> " + order + " was unsuccessful (couldn't be sent back to dining hall service).");
         } else {
-            log.info("<-- "+finishedOrder+" was sent back to Kitchen successfully.");
+            log.info("<- " + finishedOrder + " was sent back to Dining Hall successfully.");
         }
+    }
+
+    public Double getEstimatedPrepTimeForOrderById(Integer orderId) {
+        List<CookingDetails> foodDetails = orderToFoodListMap.get(orderId);
+        Optional<Order> orderOptional = orderList.stream().filter(order1 -> order1.getOrderId() == orderId).findFirst();
+
+        if (foodDetails != null && orderOptional.isPresent()) {
+            Order order = orderOptional.get();
+            int B = cookList.stream().mapToInt(Cook::getProficiency).sum();
+            List<Integer> cookedItemsIds = orderToFoodListMap.get(orderId).stream().map(CookingDetails::getFoodId).collect(Collectors.toList());
+            List<Food> itemsNotReady = order.getItems().stream().filter(i -> !cookedItemsIds.contains(i)).map(this::getItemById).collect(Collectors.toList());
+
+            double A = 0;
+            double C = 0;
+
+            if (itemsNotReady.isEmpty())
+                return 0D;
+
+            for (Food item : itemsNotReady) {
+                if (item.getCookingApparatus() == null) {
+                    A += item.getPreparationTime();
+                } else {
+                    C += item.getPreparationTime();
+                }
+            }
+
+            int D = NUMBER_OF_OVENS + NUMBER_OF_STOVES;
+
+            double E = items.size();
+            int F = itemsNotReady.size();
+
+            return (A / B + C / D) * (E + F) / F;
+        } else return 0D;
+    }
+
+    private Food getItemById(Integer id){
+        return itemMap.get(id);
     }
 
     private static List<Food> loadDefaultMenu() {
         ObjectMapper mapper = new ObjectMapper();
         InputStream is = KitchenService.class.getResourceAsStream("/menu-items.json");
         try {
-            return mapper.readValue(is, new TypeReference<List<Food>>() {
+            List<Food> f = mapper.readValue(is, new TypeReference<>() {
             });
+            itemMap = new HashMap<>();
+            for (Food food : f){
+                itemMap.put(food.getId(), food);
+            }
+            return f;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -94,7 +147,7 @@ public class KitchenService {
         ObjectMapper mapper = new ObjectMapper();
         InputStream is = KitchenService.class.getResourceAsStream("/cooks.json");
         try {
-            return mapper.readValue(is, new TypeReference<List<Cook>>() {
+            return mapper.readValue(is, new TypeReference<>() {
             });
         } catch (IOException e) {
             throw new RuntimeException(e);

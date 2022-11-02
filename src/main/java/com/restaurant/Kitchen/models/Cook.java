@@ -74,7 +74,7 @@ public class Cook {
             do {
                 item = items.stream().filter(i -> i.getComplexity() <= rank).findFirst();
                 if(item.isEmpty())
-                    Thread.sleep(3*TIME_UNIT);
+                    Thread.sleep(TIME_UNIT);
             } while(item.isEmpty());
 
             items.remove(item.get());
