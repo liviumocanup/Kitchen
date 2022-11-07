@@ -21,4 +21,9 @@ public class KitchenController {
     public void receiveOrder(@RequestBody Order order) {
         kitchenService.receiveOrder(order);
     }
+
+    @GetMapping("/{id}")
+    public Double getEstimatedPrepTimeForOrderById(@PathVariable Integer id){
+        return kitchenService.getEstimatedPrepTimeForOrderById(id);
+    }
 }
