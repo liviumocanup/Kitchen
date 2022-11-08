@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
@@ -20,7 +21,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class KitchenService {
-    public static final List<Food> foodList = loadDefaultMenu();
+    public static final List<Food> foodList = new ArrayList<>();
     public static final List<Cook> cookList = loadDefaultCooks();
     public static final List<Order> orderList = new CopyOnWriteArrayList<>();
 
@@ -42,6 +43,15 @@ public class KitchenService {
     @Value("${dining-hall-service.url}")
     public void setDiningHallServiceUrl(String url) {
         DINING_HALL_URL = url;
+    }
+
+    @Value("${restaurant.menu}")
+    public String restaurantMenu;
+
+    @PostConstruct
+    public void loadMenu() {
+        System.out.println(restaurantMenu);
+        loadDefaultMenu();
     }
 
     public void receiveOrder(Order order) {
@@ -80,6 +90,8 @@ public class KitchenService {
         Long cookingTime = (Instant.now().getEpochSecond() - order.getReceivedAt().getEpochSecond());
         FinishedOrder finishedOrder = new FinishedOrder(order, cookingTime, orderToFoodListMap.get(order.getOrderId()));
 
+        orderToFoodListMap.remove(order.getOrderId());
+
         RestTemplate restTemplate = new RestTemplate();
 
         ResponseEntity<Void> response = restTemplate.postForEntity(DINING_HALL_URL, finishedOrder, Void.class);
@@ -92,16 +104,22 @@ public class KitchenService {
 
     public Double getEstimatedPrepTimeForOrderById(Integer orderId) {
         List<CookingDetails> foodDetails = orderToFoodListMap.get(orderId);
-        Optional<Order> orderOptional = orderList.stream().filter(order1 -> order1.getOrderId() == orderId).findFirst();
+        Optional<Order> orderOptional = orderList.stream()
+                .filter(order1 -> Objects.equals(order1.getOrderId(), orderId))
+                .findFirst();
 
         if (foodDetails != null && orderOptional.isPresent()) {
             Order order = orderOptional.get();
             int B = cookList.stream().mapToInt(Cook::getProficiency).sum();
-            List<Integer> cookedItemsIds = orderToFoodListMap.get(orderId).stream().map(CookingDetails::getFoodId).collect(Collectors.toList());
-            List<Food> itemsNotReady = order.getItems().stream().filter(i -> !cookedItemsIds.contains(i)).map(this::getItemById).collect(Collectors.toList());
+            List<Integer> cookedItemsIds = orderToFoodListMap.get(orderId).stream()
+                    .map(CookingDetails::getFoodId)
+                    .collect(Collectors.toList());
+            List<Food> itemsNotReady = order.getItems().stream()
+                    .filter(i -> !cookedItemsIds.contains(i))
+                    .map(this::getItemById)
+                    .collect(Collectors.toList());
 
-            double A = 0;
-            double C = 0;
+            double A = 0, C = 0;
 
             if (itemsNotReady.isEmpty())
                 return 0D;
@@ -127,17 +145,17 @@ public class KitchenService {
         return itemMap.get(id);
     }
 
-    private static List<Food> loadDefaultMenu() {
+    private void loadDefaultMenu() {
         ObjectMapper mapper = new ObjectMapper();
-        InputStream is = KitchenService.class.getResourceAsStream("/menu-items.json");
+        System.out.println(restaurantMenu);
+        InputStream is = KitchenService.class.getResourceAsStream("/"+restaurantMenu);
         try {
-            List<Food> f = mapper.readValue(is, new TypeReference<>() {
-            });
+            List<Food> f = mapper.readValue(is, new TypeReference<>() {});
             itemMap = new HashMap<>();
             for (Food food : f){
                 itemMap.put(food.getId(), food);
+                foodList.add(food);
             }
-            return f;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

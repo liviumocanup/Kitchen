@@ -6,8 +6,6 @@ import lombok.*;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 @Getter
 @Setter
@@ -15,25 +13,25 @@ import java.util.concurrent.atomic.AtomicLong;
 @NoArgsConstructor
 public class Order {
     @JsonAlias("order_id")
-    private int orderId;
+    private Integer orderId;
 
     @JsonAlias("table_id")
-    private int tableId;
+    private Integer tableId;
 
     @JsonAlias("waiter_id")
-    private int waiterId;
+    private Integer waiterId;
 
     @JsonAlias("items")
     private List<Integer> items;
 
     @JsonAlias("priority")
-    private int priority;
+    private Integer priority;
 
     @JsonAlias("max_wait")
-    private double maxWait;
+    private Double maxWait;
 
     @JsonAlias("pick_up_time")
-    private long pickUpTime;
+    private Long pickUpTime;
 
     @JsonIgnore
     private Instant receivedAt;
