@@ -2,7 +2,7 @@ package com.restaurant.Kitchen.models;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.restaurant.Kitchen.constants.CookingApparatus;
+import com.restaurant.Kitchen.constants.CookingApparatusType;
 import com.restaurant.Kitchen.service.KitchenService;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static com.restaurant.Kitchen.service.KitchenService.TIME_UNIT;
+import static com.restaurant.Kitchen.service.KitchenService.checkIfOrderIsReady;
 import static com.restaurant.Kitchen.service.KitchenService.items;
 
 @Getter
@@ -36,9 +38,6 @@ public class Cook {
     private ExecutorService executorService;
 
     @JsonIgnore
-    private static final int TIME_UNIT = KitchenService.TIME_UNIT;
-
-    @JsonIgnore
     private static final List<Item> checkedFoods = new CopyOnWriteArrayList<>();
 
     @JsonIgnore
@@ -50,14 +49,12 @@ public class Cook {
         Runnable checkItems = () -> {
 
             while (true) {
-                if(concurrentDishesCounter.get()<proficiency){
+                if (concurrentDishesCounter.get() < proficiency) {
                     Item item = findRightFoodToCook();
 
                     itemIsCooked(item);
-
-                    KitchenService.checkIfOrderIsReady(item, id);
-                }else {
-                    throw new RuntimeException();
+                } else {
+                    Thread.currentThread().interrupt();
                 }
             }
 
@@ -68,14 +65,14 @@ public class Cook {
         }
     }
 
-    private Item findRightFoodToCook() {
+    private synchronized Item findRightFoodToCook() {
         try {
             Optional<Item> item;
             do {
                 item = items.stream().filter(i -> i.getComplexity() <= rank).findFirst();
-                if(item.isEmpty())
+                if (item.isEmpty())
                     Thread.sleep(TIME_UNIT);
-            } while(item.isEmpty());
+            } while (item.isEmpty());
 
             items.remove(item.get());
             concurrentDishesCounter.incrementAndGet();
@@ -87,22 +84,30 @@ public class Cook {
     }
 
     private void itemIsCooked(Item item) {
-        try {
-            if (item.getCookingApparatus() != null) {
-                Semaphore semaphore = item.getCookingApparatus().equals(CookingApparatus.OVEN) ?
-                        KitchenService.ovenSemaphore : KitchenService.stoveSemaphore;
-
-                semaphore.acquire();
-                Thread.sleep(item.getCookingTime() * TIME_UNIT);
-                concurrentDishesCounter.decrementAndGet();
-                semaphore.release();
+        if (item.getComplexity() <= rank) {
+            if (item.getCookingApparatusType() != null) {
+                if (item.getCookingApparatusType() == CookingApparatusType.OVEN) {
+                    Oven.getInstance().addOrderItemToQueue(this, item);
+                    concurrentDishesCounter.decrementAndGet();
+                } else if (item.getCookingApparatusType() == CookingApparatusType.STOVE) {
+                    Stove.getInstance().addOrderItemToQueue(this, item);
+                    concurrentDishesCounter.decrementAndGet();
+                }
             } else {
-                Thread.sleep(item.getCookingTime() * TIME_UNIT);
-                concurrentDishesCounter.decrementAndGet();
+                try {
+                    Thread.sleep(item.getCookingTime() * TIME_UNIT);
+                    concurrentDishesCounter.decrementAndGet();
+                    checkIfOrderIsReady(item, id);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
             }
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+        } else {
+            items.add(item);
+            concurrentDishesCounter.decrementAndGet();
         }
+
+
     }
 
     @Override
