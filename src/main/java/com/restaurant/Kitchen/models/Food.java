@@ -1,7 +1,7 @@
 package com.restaurant.Kitchen.models;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
-import com.restaurant.Kitchen.constants.CookingApparatus;
+import com.restaurant.Kitchen.constants.CookingApparatusType;
 import lombok.Getter;
 
 @Getter
@@ -19,7 +19,7 @@ public class Food {
     private int complexity;
 
     @JsonAlias("cooking-apparatus")
-    private CookingApparatus cookingApparatus;
+    private CookingApparatusType cookingApparatusType;
 
     @Override
     public String toString() {
@@ -28,7 +28,7 @@ public class Food {
                 ", name='" + name + '\'' +
                 ", preparationTime=" + preparationTime +
                 ", complexity=" + complexity +
-                ", cookingApparatus=" + cookingApparatus +
+                ", cookingApparatus=" + cookingApparatusType +
                 '}';
     }
 }

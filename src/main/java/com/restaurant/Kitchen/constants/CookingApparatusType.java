@@ -2,7 +2,7 @@ package com.restaurant.Kitchen.constants;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 
-public enum CookingApparatus {
+public enum CookingApparatusType {
 
     STOVE, OVEN;
 
